@@ -101,7 +101,7 @@ async function run() {
             res.send(result)
         })
 
-        app.delete('/users/:id', async (req, res) => {
+        app.delete('/users/:id', verifyToken, verifyAdmin, async (req, res) => {
             const id = req.params.id
             const query = { _id: new ObjectId(id) }
             const result = await userCollection.deleteOne(query)
@@ -126,9 +126,40 @@ async function run() {
             res.send(result)
         })
 
+        app.get('/menu/:id', async (req, res) => {
+            const id = req.params.id
+            const query = { _id: new ObjectId(id) }
+            const result = await menuCollection.findOne(query)
+            res.send(result)
+        })
+
         app.post('/menu', verifyToken, verifyAdmin, async (req, res) => {
             const menuItem = req.body
             const result = await menuCollection.insertOne(menuItem)
+            res.send(result)
+        })
+
+        app.patch('/menu/:id', async (req, res) => {
+            const item = req.body
+            const id = req.params.id
+            const filter = { _id: new ObjectId(id) }
+            const updatedDoc = {
+                $set: {
+                    name: item.name,
+                    price: item.price,
+                    image: item.image,
+                    category: item.category,
+                    recipe: item.recipe
+                }
+            }
+            const result = await menuCollection.updateOne(filter, updatedDoc)
+            res.send(result)
+        })
+
+        app.delete('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id
+            const query = { _id: new ObjectId(id) }
+            const result = await menuCollection.deleteOne(query)
             res.send(result)
         })
 
