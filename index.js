@@ -5,7 +5,7 @@ const cors = require('cors');
 require('dotenv').config()
 const port = process.env.PORT || 5000;
 
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY)
 
 // middleware
 app.use(cors())
@@ -16,8 +16,8 @@ app.use(express.json())
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.8ww6tl6.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
+    // Create a MongoClient with a MongoClientOptions object to set the Stable API version
     serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
@@ -34,6 +34,7 @@ async function run() {
         const reviewCollection = client.db('bistroDb').collection('reviews')
         const cartCollection = client.db('bistroDb').collection('carts')
         const userCollection = client.db('bistroDb').collection('users')
+        const paymentCollection = client.db('bistroDb').collection('payments')
 
 
         // jwt related API
@@ -190,9 +191,106 @@ async function run() {
             res.send(result)
         })
 
+        // payment intent
+        app.post("/create-payment-intent", async (req, res) => {
+            const { price } = req.body
+            const amount = parseInt(price * 100)
+            console.log(amount, 'amount inside the intent');
+
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
+            })
+
+            res.send({
+                clientSecret: paymentIntent.client_secret
+            })
+        })
+
+        app.get('/payments/:email', verifyToken, async (req, res) => {
+            const query = { email: req.params.email }
+            if (req.params.email !== req.decoded.email) {
+                return res.status(403).send({ message: 'Forbidden Access' })
+            }
+            const result = await paymentCollection.find(query).toArray()
+            res.send(result)
+        })
+
+        app.post('/payments', async (req, res) => {
+            const payment = req.body
+            const paymentResult = await paymentCollection.insertOne(payment)
+
+            console.log('payment info', payment);
+            const query = {
+                _id: {
+                    $in: payment.cartIds.map(id => new ObjectId(id))
+                }
+            }
+            const deleteResult = await cartCollection.deleteMany(query)
+
+            res.send({ paymentResult, deleteResult })
+        })
+
+        // stats or analytics 
+
+        app.get('/admin-stats', verifyToken, verifyAdmin, async (req, res) => {
+            const customers = await userCollection.estimatedDocumentCount()
+            const products = await menuCollection.estimatedDocumentCount()
+            const orders = await paymentCollection.estimatedDocumentCount()
+            const result = await paymentCollection.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalRevenue: {
+                            $sum: {
+                                $toDouble: "$price"
+                            }
+                        }
+                    }
+                }
+            ]).toArray()
+
+            const revenue = result.length > 0 ? result[0].totalRevenue : 0
+
+            res.send({
+                customers,
+                products,
+                orders,
+                revenue
+            })
+        })
+
+        // app.get('/order-stats', async (req, res) => {
+        //     const result = await paymentCollection.aggregate([
+        //         {
+        //             $unwind: '$cartIds'
+        //         },
+        //         {
+        //             $lookup: {
+        //                 from: 'menu',
+        //                 localField: 'cartIds',
+        //                 foreignField: '_id',
+        //                 as: 'menuItems'
+        //             }
+        //         },
+        //         {
+        //             $unwind: '$menuItems'
+        //         },
+        //         {
+        //             $group: {
+        //                 _id: '$menuItems.category'
+
+        //             }
+        //         }
+        //     ]).toArray()
+
+        //     res.send(result)
+        // })
+
         // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
-        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+        // await client.db("admin").command({ ping: 1 });
+        // console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
         // await client.close();
